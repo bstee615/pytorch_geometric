@@ -1,7 +1,16 @@
+import os.path
+import random
+import shutil
 from itertools import product
 
 import argparse
+
+import numpy as np
+import torch
+from torch.utils.tensorboard import SummaryWriter
+
 from datasets import get_dataset
+from gin_example import MyGIN
 from train_eval import cross_validation_with_val_set
 
 from gcn import GCN, GCNWithJK
@@ -18,34 +27,40 @@ from sort_pool import SortPool
 from asap import ASAP
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--epochs', type=int, default=100)
+parser.add_argument('--epochs', type=int, default=400)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--lr', type=float, default=0.01)
 parser.add_argument('--lr_decay_factor', type=float, default=0.5)
 parser.add_argument('--lr_decay_step_size', type=int, default=50)
 args = parser.parse_args()
 
-layers = [1, 2, 3, 4, 5]
-hiddens = [16, 32, 64, 128]
-datasets = ['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY']  # , 'COLLAB']
+# layers = [1, 2, 3, 4, 5]
+layers = [5]
+# hiddens = [16, 32, 64, 128]
+hiddens = [64]
+# datasets = ['MUTAG', 'PROTEINS', 'IMDB-BINARY', 'REDDIT-BINARY']  # , 'COLLAB']
+# datasets = ['MUTAG', 'NCI1', 'IMDB-BINARY', 'REDDIT-BINARY']  # , 'COLLAB']
+datasets = ['PTC_MM']  # , 'COLLAB']
+# datasets = ['PROTEINS']  # , 'COLLAB']
 nets = [
-    GCNWithJK,
-    GraphSAGEWithJK,
-    GIN0WithJK,
+    # GCNWithJK,
+    # GraphSAGEWithJK,
+    # GIN0WithJK,
     GINWithJK,
-    Graclus,
-    TopK,
-    SAGPool,
-    DiffPool,
-    EdgePool,
-    GCN,
-    GraphSAGE,
-    GIN0,
-    GIN,
-    GlobalAttentionNet,
-    Set2SetNet,
-    SortPool,
-    ASAP,
+    # Graclus,
+    # TopK,
+    # SAGPool,
+    # DiffPool,
+    # EdgePool,
+    # GCN,
+    # GraphSAGE,
+    # GIN0,
+    # GIN,
+    # MyGIN,
+    # GlobalAttentionNet,
+    # Set2SetNet,
+    # SortPool,
+    # ASAP,
 ]
 
 
@@ -61,8 +76,16 @@ for dataset_name, Net in product(datasets, nets):
     best_result = (float('inf'), 0, 0)  # (loss, acc, std)
     print('-----\n{} - {}'.format(dataset_name, Net.__name__))
     for num_layers, hidden in product(layers, hiddens):
+        random.seed(0)
+        np.random.seed(0)
+        torch.random.manual_seed(0)
         dataset = get_dataset(dataset_name, sparse=Net != DiffPool)
         model = Net(dataset, num_layers, hidden)
+        log_path = 'runs/' + '-'.join([str(s) for s in (dataset_name, Net.__name__, num_layers, hidden)])
+        print('Log path: {}'.format(log_path))
+        if os.path.exists(log_path):
+            shutil.rmtree(log_path)
+        writer = SummaryWriter(log_path)
         loss, acc, std = cross_validation_with_val_set(
             dataset,
             model,
@@ -74,6 +97,8 @@ for dataset_name, Net in product(datasets, nets):
             lr_decay_step_size=args.lr_decay_step_size,
             weight_decay=0,
             logger=None,
+            writer=writer,
+            just_one=True,
         )
         if loss < best_result[0]:
             best_result = (loss, acc, std)

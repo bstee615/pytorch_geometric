@@ -6,17 +6,22 @@ from torch import tensor
 from torch.optim import Adam
 from sklearn.model_selection import StratifiedKFold
 from torch_geometric.loader import DataLoader, DenseDataLoader as DenseLoader
+from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                                   lr, lr_decay_factor, lr_decay_step_size,
-                                  weight_decay, logger=None):
+                                  weight_decay, logger=None, writer=None, just_one=False):
 
     val_losses, accs, durations = [], [], []
-    for fold, (train_idx, test_idx,
-               val_idx) in enumerate(zip(*k_fold(dataset, folds))):
+    dataset_folds = list(enumerate(zip(*k_fold(dataset, folds))))
+    if just_one:
+        dataset_folds = [dataset_folds[0]]
+        folds = 1
+    for fold, (train_idx, test_idx, val_idx) in dataset_folds:
 
         train_dataset = dataset[train_idx]
         test_dataset = dataset[test_idx]
@@ -38,8 +43,7 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
             torch.cuda.synchronize()
 
         t_start = time.perf_counter()
-
-        for epoch in range(1, epochs + 1):
+        for epoch in tqdm(range(1, epochs + 1), desc='epochs'):
             train_loss = train(model, optimizer, train_loader)
             val_losses.append(eval_loss(model, val_loader))
             accs.append(eval_acc(model, test_loader))
@@ -49,7 +53,13 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
                 'train_loss': train_loss,
                 'val_loss': val_losses[-1],
                 'test_acc': accs[-1],
+                'train_acc': eval_acc(model, train_loader),
             }
+
+            if writer is not None:
+                for k, v in eval_info.items():
+                    if k != 'epoch':
+                        writer.add_scalar(k, v, epoch)
 
             if logger is not None:
                 logger(eval_info)
@@ -63,6 +73,7 @@ def cross_validation_with_val_set(dataset, model, folds, epochs, batch_size,
 
         t_end = time.perf_counter()
         durations.append(t_end - t_start)
+        writer = None  # disable writer after the first fold
 
     loss, acc, duration = tensor(val_losses), tensor(accs), tensor(durations)
     loss, acc = loss.view(folds, epochs), acc.view(folds, epochs)
